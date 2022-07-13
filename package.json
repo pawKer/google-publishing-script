@@ -1,0 +1,21 @@
+{
+  "name": "google-publishing-script",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-json-modules index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^0.27.2",
+    "cron": "^2.0.0",
+    "dotenv": "^16.0.1",
+    "fast-xml-parser": "^4.0.9",
+    "form-data": "^4.0.0",
+    "googleapis": "^105.0.0",
+    "mailgun.js": "^7.0.4"
+  }
+}
