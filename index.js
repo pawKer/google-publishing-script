@@ -56,6 +56,12 @@ const getAllUrlsToPublish = async (config, url) => {
     throw e;
   }
 
+  if (!parsedSitemapIndex.sitemapindex) {
+    const urlsToCheck = parsedSitemapIndex.urlset.url.map((item) => item.loc);
+    allUrlsToPublish.set(url, urlsToCheck);
+    return allUrlsToPublish;
+  }
+
   // Put all the sitemap URLs into a lists
   const sitemapsToCheck = parsedSitemapIndex.sitemapindex.sitemap.map(
     (item) => item.loc
@@ -118,6 +124,7 @@ const publishSites = async () => {
   const config = readDataFromDb();
 
   const allUrlsToPublish = await getAllUrlsToPublish(config, sitemapIndexURL);
+  // console.log(allUrlsToPublish);
   // const authData = await jwtClient.authorize();
   for (const sitemap of allUrlsToPublish.keys()) {
     const urlList = allUrlsToPublish.get(sitemap);
@@ -127,12 +134,11 @@ const publishSites = async () => {
     // otherwise default to 0
     if (COUNT_PUBLISHED_TODAY === 0) {
       indexOfLastPublished = config.lastItemPublished
-        ? urlList.findIndex((item) => item === config.lastItemPublished)
+        ? urlList.findIndex((item) => item === config.lastItemPublished) + 1
         : 0;
 
       // If for some reason the last one we published is not in the list then default to 0
-      indexOfLastPublished =
-        indexOfLastPublished === -1 ? 0 : indexOfLastPublished + 1;
+      if (indexOfLastPublished === -1) indexOfLastPublished = 0;
     }
 
     // Starting from where we left off, loop through all urls we need to publish
@@ -184,7 +190,11 @@ const publishSites = async () => {
   console.log("Done");
 };
 
-const callApiToPublish = async (startIndex, urlsToPublish) => {
+const callApiToPublish = async (
+  startIndex,
+  urlsToPublish,
+  authData = undefined
+) => {
   let returnObj = {
     errors: [],
   };
@@ -239,7 +249,7 @@ const saveDataToDb = (data) => {
   });
 };
 
-// Need to update cronjob schedule
+// Need to update cronjob schedule: 0 18 * * * - every day at 6pm
 const scheduledJob = new cron.CronJob("* * * * *", async () => {
   console.log(`Running cron, current time: ${new Date().toISOString()}`);
   try {
