@@ -1,3 +1,4 @@
+import "dotenv/config";
 const adresees = [process.env.EMAIL_RECIPIENT];
 
 const successMailContent = {

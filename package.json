@@ -5,7 +5,8 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node --experimental-json-modules index.js"
+    "start": "node --experimental-json-modules index.js",
+    "publish-single": "node --experimental-json-modules publish-single-url.js"
   },
   "author": "",
   "license": "ISC",

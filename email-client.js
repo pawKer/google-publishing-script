@@ -5,6 +5,8 @@ import {
   successMailContent,
   warningMailContent,
 } from "./email-setup.js";
+import "dotenv/config";
+
 export class EmailClient {
   constructor() {
     this.mailgun = new Mailgun(formData);
@@ -37,9 +39,10 @@ export class EmailClient {
         "sandbox152ec7daccee4ce98440007b76db8400.mailgun.org",
         mailContent
       );
+      console.log(`${type} email sent.`);
     } catch (e) {
       console.error(`Failed sending email: ${e}`);
+      console.error(e.stack);
     }
-    console.log(`${type} email sent.`);
   }
 }

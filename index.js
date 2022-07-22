@@ -7,8 +7,8 @@ import key from "./service_account.json" assert { type: "json" };
 import { EmailClient } from "./email-client.js";
 import "dotenv/config";
 
-const maxQuota = 5; // Daily quota for Google API;
-const sitemapIndexURL = "<URL-TO-CHECK>";
+const MAX_QUOTA = 5; // Daily quota for Google API;
+const sitemapIndexURL = process.env.SITEMAP_INDEX_URL;
 const options = {
   url: "https://indexing.googleapis.com/v3/urlNotifications:publish",
   method: "POST",
@@ -34,30 +34,16 @@ const emailClient = new EmailClient();
 
 let COUNT_PUBLISHED_TODAY = 0;
 
-const publishSites = async () => {
-  const processedSitemaps = [];
-  const errorSitemaps = [];
-  let lastPublishedUrl = undefined;
-  let config = {};
-  COUNT_PUBLISHED_TODAY = 0;
-
-  try {
-    // Reading from the DB (file based at the moment)
-    const jsonString = fs.readFileSync("config/config.json");
-    config = JSON.parse(jsonString);
-  } catch (e) {
-    console.log("No existing DB found. Defaulting to empty");
-  }
+const getAllUrlsToPublish = async (config, url) => {
+  const allUrlsToPublish = new Map();
 
   // Get all the sitemaps
-  console.log(`Getting the sitemap index at: ${sitemapIndexURL}`);
+  console.log(`Getting the sitemap index at: ${url}`);
   let sitemapIndex;
   try {
-    sitemapIndex = await axios.get(sitemapIndexURL);
+    sitemapIndex = await axios.get(url);
   } catch (e) {
-    console.error(
-      `Failed getting sitemap index response for: ${sitemapIndexURL}`
-    );
+    console.error(`Failed getting sitemap index response for: ${url}`);
     throw e;
   }
 
@@ -66,9 +52,7 @@ const publishSites = async () => {
   try {
     parsedSitemapIndex = parser.parse(sitemapIndex.data);
   } catch (e) {
-    console.error(
-      `Failed parsing sitemap index response for: ${sitemapIndexURL}`
-    );
+    console.error(`Failed parsing sitemap index response for: ${url}`);
     throw e;
   }
 
@@ -86,15 +70,15 @@ const publishSites = async () => {
   // default to 0
   indexOfLastChecked = indexOfLastChecked === -1 ? 0 : indexOfLastChecked;
 
-  // const authData = await jwtClient.authorize();
+  let addedUrls = 0;
 
   // Loop thorugh all the sitemaps from the one we last checked
   // until the end
   for (let i = indexOfLastChecked; i < sitemapsToCheck.length; i++) {
-    processedSitemaps.push(sitemapsToCheck[indexOfLastChecked]);
+    // processedSitemaps.push(sitemapsToCheck[indexOfLastChecked]);
 
     // Get all the sites in that sitemap
-    console.log(`Getting all URLs for: ${sitemapsToCheck[indexOfLastChecked]}`);
+    console.log(`Getting all URLs for: ${sitemapsToCheck[i]}`);
     let siteData;
     try {
       siteData = await axios.get(sitemapsToCheck[i]);
@@ -115,14 +99,35 @@ const publishSites = async () => {
     // Get all the urls that we need to publish
     const urlsToPublish = parsedData.urlset.url.map((item) => item.loc);
     console.log(`Found ${urlsToPublish.length} urls.`);
+    allUrlsToPublish.set(sitemapsToCheck[i], urlsToPublish);
+    addedUrls += urlsToPublish.length;
+    if (Array.from(allUrlsToPublish).length === 2 && addedUrls > MAX_QUOTA) {
+      console.log(`Got ${addedUrls} URLs. Should be enough for now.`);
+      break;
+    }
+  }
+  return allUrlsToPublish;
+};
 
+const publishSites = async () => {
+  const errorSitemaps = [];
+  let lastPublishedUrl = undefined;
+  let lastCheckedMap = undefined;
+  COUNT_PUBLISHED_TODAY = 0;
+
+  const config = readDataFromDb();
+
+  const allUrlsToPublish = await getAllUrlsToPublish(config, sitemapIndexURL);
+  // const authData = await jwtClient.authorize();
+  for (const sitemap of allUrlsToPublish.keys()) {
+    const urlList = allUrlsToPublish.get(sitemap);
     let indexOfLastPublished = 0;
 
-    // If it's the first iteration, then we want to find the last one we published and start from there plus one
+    // We want to find the last one we published and start from there plus one
     // otherwise default to 0
     if (COUNT_PUBLISHED_TODAY === 0) {
       indexOfLastPublished = config.lastItemPublished
-        ? urlsToPublish.findIndex((item) => item === config.lastItemPublished)
+        ? urlList.findIndex((item) => item === config.lastItemPublished)
         : 0;
 
       // If for some reason the last one we published is not in the list then default to 0
@@ -133,20 +138,27 @@ const publishSites = async () => {
     // Starting from where we left off, loop through all urls we need to publish
     const response = await callApiToPublish(
       indexOfLastPublished,
-      urlsToPublish,
-      sitemapsToCheck[i] // Need to pass authData as well
+      urlList // Need to pass authData as well
     );
 
     if (response.errors.length > 0) errorSitemaps.push(...response.errors);
-    lastPublishedUrl = response.lastPublishedUrl;
-    // If count has exceeded quota
-    // Exit this loop
-    if (COUNT_PUBLISHED_TODAY >= maxQuota) break;
+
+    if (COUNT_PUBLISHED_TODAY >= MAX_QUOTA) {
+      lastPublishedUrl = response.lastItemPublished;
+      lastCheckedMap = sitemap;
+      const data = {
+        lastMapChecked: lastCheckedMap,
+        lastItemPublished: lastPublishedUrl,
+      };
+      saveDataToDb(data);
+      break;
+    }
   }
+
   // If count has NOT exceeded quota at this point
   // it should mean we have already processed everything we should have
   console.log(`Published ${COUNT_PUBLISHED_TODAY} URLs succesfully`);
-  if (COUNT_PUBLISHED_TODAY < maxQuota) {
+  if (COUNT_PUBLISHED_TODAY < MAX_QUOTA) {
     console.log("All finished for this sitemap index.");
   }
 
@@ -154,19 +166,25 @@ const publishSites = async () => {
     console.warn(`Had some URLs that failed to publish: ${errorSitemaps}`);
     await emailClient.sendMail(
       "WARNING",
-      `Published ${COUNT_PUBLISHED_TODAY} URLs with some errors for ${processedSitemaps}. The last url published was: ${lastPublishedUrl}. The URLs that got an error were ${errorSitemaps}.`
+      `Published ${COUNT_PUBLISHED_TODAY} URLs with some errors for ${Array.from(
+        allUrlsToPublish.keys()
+      )}. The last url published was: ${lastPublishedUrl}. The URLs that got an error were ${errorSitemaps}.`
     );
   } else {
     await emailClient.sendMail(
       "SUCCESS",
-      `Published ${COUNT_PUBLISHED_TODAY} URLs succesfully for ${processedSitemaps}. The last url published was: ${lastPublishedUrl}`
+      `Published ${COUNT_PUBLISHED_TODAY} URLs succesfully for ${Array.from(
+        allUrlsToPublish.keys()
+      )}. The last url published was: ${lastPublishedUrl}`
     );
   }
-
+  console.log(
+    `Last published URL: ${lastPublishedUrl}, last map checked: ${lastCheckedMap}`
+  );
   console.log("Done");
 };
 
-const callApiToPublish = async (startIndex, urlsToPublish, currentMap) => {
+const callApiToPublish = async (startIndex, urlsToPublish) => {
   let returnObj = {
     errors: [],
   };
@@ -190,27 +208,35 @@ const callApiToPublish = async (startIndex, urlsToPublish, currentMap) => {
     COUNT_PUBLISHED_TODAY++;
 
     // If count exceeds quota
-    if (COUNT_PUBLISHED_TODAY >= maxQuota) {
+    if (COUNT_PUBLISHED_TODAY >= MAX_QUOTA) {
       console.log("Stopping before exceeding quota...");
-      // Save the last processed items in the DB
-      const lastPublishedUrl = urlsToPublish[j];
-      const data = {
-        lastMapChecked: currentMap,
-        lastItemPublished: lastPublishedUrl,
-      };
-      returnObj.lastPublishedUrl = lastPublishedUrl;
-      fs.writeFile("config/config.json", JSON.stringify(data), (err) => {
-        if (err) {
-          console.error("Failed to update DB.");
-          throw err;
-        }
-        console.log("Updated DB.");
-      });
+      returnObj.lastItemPublished = urlsToPublish[j];
       // Exit this loop
       break;
     }
   }
   return returnObj;
+};
+
+const readDataFromDb = () => {
+  try {
+    // Reading from the DB (file based at the moment)
+    const jsonString = fs.readFileSync("config/config.json");
+    return JSON.parse(jsonString);
+  } catch (e) {
+    console.log("No existing DB found. Defaulting to empty");
+    return {};
+  }
+};
+
+const saveDataToDb = (data) => {
+  fs.writeFile("config/config.json", JSON.stringify(data), (err) => {
+    if (err) {
+      console.error("Failed to update DB.");
+      throw err;
+    }
+    console.log("Updated DB.");
+  });
 };
 
 // Need to update cronjob schedule
