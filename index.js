@@ -210,6 +210,9 @@ const callApiToPublish = async (
     //   console.warn(
     //     `Error publishing URL: ${urlsToPublish[j]}, error was: ${e}`
     //   );
+    //   if (e.response && e.response.status === 429) {
+    //     throw Error("API Quota Exceeded");
+    //   }
     // }
     // console.log(resp.status);
     console.log(`Published: ${urlsToPublish[j]}`);
