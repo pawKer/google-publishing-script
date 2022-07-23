@@ -10,13 +10,18 @@ import "dotenv/config";
 export class EmailClient {
   constructor() {
     this.mailgun = new Mailgun(formData);
-    this.mg = this.mailgun.client({
-      username: "api",
-      key: process.env.MAILGUN_API_KEY,
-    });
+    if (process.env.MAILGUN_API_KEY)
+      this.mg = this.mailgun.client({
+        username: "api",
+        key: process.env.MAILGUN_API_KEY,
+      });
   }
 
   async sendMail(type, text) {
+    if (!process.env.MAILGUN_API_KEY) {
+      console.log("Mailgun API Key not set. Email NOT sent.");
+      return;
+    }
     let mailContent;
     switch (type) {
       case "SUCCESS":
