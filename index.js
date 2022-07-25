@@ -292,7 +292,7 @@ const callApiToPublishBatch = async (
     batch.push(getBatchItem(urlsToPublish[j]));
     urlsInBatch.push(urlsToPublish[j]);
     if (batch.length === BATCH_SIZE) {
-      publishBatch(batch, batchOptions);
+      await publishBatch(batch, batchOptions);
       // Update published count
       COUNT_PUBLISHED_TODAY += batch.length;
       console.log(`Published ${COUNT_PUBLISHED_TODAY}/${MAX_QUOTA}`);
@@ -311,14 +311,14 @@ const callApiToPublishBatch = async (
   }
   // Less than BATCH_SIZE urls remaining which we need to publish as well
   if (batch.length !== 0 && COUNT_PUBLISHED_TODAY < MAX_QUOTA) {
-    publishBatch(batch, batchOptions);
+    await publishBatch(batch, batchOptions);
     COUNT_PUBLISHED_TODAY += batch.length;
     console.log(`Published ${COUNT_PUBLISHED_TODAY}/${MAX_QUOTA}`);
   }
   return returnObj;
 };
 
-const publishBatch = (batch, batchOptions) => {
+const publishBatch = async (batch, batchOptions) => {
   // Publish batch
   let resp;
   try {
