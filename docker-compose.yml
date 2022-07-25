@@ -5,4 +5,4 @@ services:
     container_name: google-publishing-script
     restart: on-failure
     volumes:
-      - E:\:/usr/src/app/config
+      - <PATH-TO-A-FOLDER>:/usr/src/app/config
