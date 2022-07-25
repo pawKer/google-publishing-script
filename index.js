@@ -292,26 +292,9 @@ const callApiToPublishBatch = async (
     batch.push(getBatchItem(urlsToPublish[j]));
     urlsInBatch.push(urlsToPublish[j]);
     if (batch.length === BATCH_SIZE) {
-      // Publish batch
-      let resp;
-      try {
-        batchOptions.multipart = batch;
-        resp = await rp(batchOptions);
-        // console.log(resp);
-        if (resp.includes("Quota exceeded")) {
-          console.error("API Quota Exceeded");
-        }
-      } catch (e) {
-        console.log(e.stack);
-        // returnObj.errors.push(urlsToPublish[j]);
-        console.warn(`Error publishing batch, error was: ${e}`);
-        if (e.response && e.response.status === 429) {
-          throw Error("API Quota Exceeded");
-        }
-      }
-
+      publishBatch(batch, batchOptions);
       // Update published count
-      COUNT_PUBLISHED_TODAY += urlsInBatch.length;
+      COUNT_PUBLISHED_TODAY += batch.length;
       console.log(`Published ${COUNT_PUBLISHED_TODAY}/${MAX_QUOTA}`);
       // Reset batch
       batch = [];
@@ -326,7 +309,33 @@ const callApiToPublishBatch = async (
       break;
     }
   }
+  // Less than BATCH_SIZE urls remaining which we need to publish as well
+  if (batch.length !== 0 && COUNT_PUBLISHED_TODAY < MAX_QUOTA) {
+    publishBatch(batch, batchOptions);
+    COUNT_PUBLISHED_TODAY += batch.length;
+    console.log(`Published ${COUNT_PUBLISHED_TODAY}/${MAX_QUOTA}`);
+  }
   return returnObj;
+};
+
+const publishBatch = (batch, batchOptions) => {
+  // Publish batch
+  let resp;
+  try {
+    batchOptions.multipart = batch;
+    resp = await rp(batchOptions);
+    // console.log(resp);
+    if (resp.includes("Quota exceeded")) {
+      console.error("API Quota Exceeded");
+    }
+  } catch (e) {
+    console.log(e.stack);
+    // returnObj.errors.push(urlsToPublish[j]);
+    console.warn(`Error publishing batch, error was: ${e}`);
+    if (e.response && e.response.status === 429) {
+      throw Error("API Quota Exceeded");
+    }
+  }
 };
 
 const readDataFromDb = () => {
