@@ -3,6 +3,6 @@ services:
   google-publishing-script:
     build: .
     container_name: google-publishing-script
-    restart: unless-stopped
+    restart: on-failure
     volumes:
       - E:\:/usr/src/app/config

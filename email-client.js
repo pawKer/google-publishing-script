@@ -1,6 +1,7 @@
 import Mailgun from "mailgun.js";
 import formData from "form-data";
 import {
+  doneMailContent,
   errorMailContent,
   successMailContent,
   warningMailContent,
@@ -32,6 +33,9 @@ export class EmailClient {
         break;
       case "ERROR":
         mailContent = errorMailContent;
+        break;
+      case "DONE":
+        mailContent = doneMailContent;
         break;
       default:
         mailContent = errorMailContent;

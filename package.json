@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node --experimental-json-modules index.js",
-    "publish-single": "node --experimental-json-modules publish-single-url.js"
+    "publish-single": "node --experimental-json-modules publish-single-url.js",
+    "test": "node --experimental-json-modules test.js"
   },
   "author": "",
   "license": "ISC",
@@ -17,6 +18,8 @@
     "fast-xml-parser": "^4.0.9",
     "form-data": "^4.0.0",
     "googleapis": "^105.0.0",
-    "mailgun.js": "^7.0.4"
+    "mailgun.js": "^7.0.4",
+    "request": "^2.88.2",
+    "request-promise-native": "^1.0.9"
   }
 }

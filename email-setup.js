@@ -19,4 +19,15 @@ const errorMailContent = {
   subject: "Script had some errors ❌",
 };
 
-export { successMailContent, errorMailContent, warningMailContent };
+const doneMailContent = {
+  from: "Publishing Script <googletestscript@sandbox152ec7daccee4ce98440007b76db8400.mailgun.org>",
+  to: adresees,
+  subject: "Script has finished publishing all URLs 🥳",
+};
+
+export {
+  successMailContent,
+  errorMailContent,
+  warningMailContent,
+  doneMailContent,
+};

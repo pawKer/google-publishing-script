@@ -6,8 +6,11 @@ import cron from "cron";
 import key from "./service_account.json" assert { type: "json" };
 import { EmailClient } from "./email-client.js";
 import "dotenv/config";
+import request from "request";
+import rp from "request-promise-native";
 
-const MAX_QUOTA = 5; // Daily quota for Google API;
+const MAX_QUOTA = 1000; // Daily quota for Google API;
+const BATCH_SIZE = 500; // Numbers of items in API requests
 const sitemapIndexURL = process.env.SITEMAP_INDEX_URL;
 const options = {
   url: "https://indexing.googleapis.com/v3/urlNotifications:publish",
@@ -28,6 +31,7 @@ const jwtClient = new google.Auth.JWT(
   ["https://www.googleapis.com/auth/indexing"],
   null
 );
+
 const parser = new XMLParser();
 
 const emailClient = new EmailClient();
@@ -70,17 +74,18 @@ const getAllUrlsToPublish = async (config, url) => {
   // Assuming the sites are ordered alphabetically, get the index in the list of the one we checked last
   let indexOfLastChecked = config.lastMapChecked
     ? sitemapsToCheck.findIndex((item) => item === config.lastMapChecked)
-    : 0;
+    : sitemapsToCheck.length - 1;
 
   // If the one we checked last is not in the list for some reason
   // default to 0
-  indexOfLastChecked = indexOfLastChecked === -1 ? 0 : indexOfLastChecked;
+  indexOfLastChecked =
+    indexOfLastChecked === -1 ? sitemapsToCheck.length - 1 : indexOfLastChecked;
 
   let addedUrls = 0;
 
   // Loop thorugh all the sitemaps from the one we last checked
   // until the end
-  for (let i = indexOfLastChecked; i < sitemapsToCheck.length; i++) {
+  for (let i = indexOfLastChecked; i >= 0; i--) {
     // processedSitemaps.push(sitemapsToCheck[indexOfLastChecked]);
 
     // Get all the sites in that sitemap
@@ -107,7 +112,7 @@ const getAllUrlsToPublish = async (config, url) => {
     console.log(`Found ${urlsToPublish.length} urls.`);
     allUrlsToPublish.set(sitemapsToCheck[i], urlsToPublish);
     addedUrls += urlsToPublish.length;
-    if (Array.from(allUrlsToPublish).length === 2 && addedUrls > MAX_QUOTA) {
+    if (Array.from(allUrlsToPublish).length >= 2 && addedUrls > MAX_QUOTA) {
       console.log(`Got ${addedUrls} URLs. Should be enough for now.`);
       break;
     }
@@ -117,16 +122,17 @@ const getAllUrlsToPublish = async (config, url) => {
 
 const publishSites = async () => {
   const errorSitemaps = [];
-  let lastPublishedUrl = undefined;
-  let lastCheckedMap = undefined;
+  let lastPublishedUrl;
+  let lastCheckedMap;
   COUNT_PUBLISHED_TODAY = 0;
 
   const config = readDataFromDb();
 
   const allUrlsToPublish = await getAllUrlsToPublish(config, sitemapIndexURL);
   // console.log(allUrlsToPublish);
-  // const authData = await jwtClient.authorize();
+  const authData = await jwtClient.authorize();
   for (const sitemap of allUrlsToPublish.keys()) {
+    console.log(`Processing: ${sitemap}`);
     const urlList = allUrlsToPublish.get(sitemap);
     let indexOfLastPublished = 0;
 
@@ -142,44 +148,60 @@ const publishSites = async () => {
     }
 
     // Starting from where we left off, loop through all urls we need to publish
-    const response = await callApiToPublish(
+    const response = await callApiToPublishBatch(
       indexOfLastPublished,
-      urlList // Need to pass authData as well
+      urlList,
+      authData // Need to pass authData as well
     );
 
     if (response.errors.length > 0) errorSitemaps.push(...response.errors);
-
+    lastPublishedUrl = response.lastItemPublished;
+    lastCheckedMap = sitemap;
     if (COUNT_PUBLISHED_TODAY >= MAX_QUOTA) {
-      lastPublishedUrl = response.lastItemPublished;
-      lastCheckedMap = sitemap;
-      const data = {
-        lastMapChecked: lastCheckedMap,
-        lastItemPublished: lastPublishedUrl,
-      };
-      saveDataToDb(data);
       break;
     }
   }
-
+  saveDataToDb({
+    lastMapChecked: lastCheckedMap,
+    lastItemPublished: lastPublishedUrl,
+  });
   // If count has NOT exceeded quota at this point
   // it should mean we have already processed everything we should have
   console.log(`Published ${COUNT_PUBLISHED_TODAY} URLs succesfully`);
   if (COUNT_PUBLISHED_TODAY < MAX_QUOTA) {
     console.log("All finished for this sitemap index.");
+    console.log(
+      `Last published URL: ${lastPublishedUrl}, last map checked: ${lastCheckedMap}`
+    );
+    await emailClient.sendMail(
+      "DONE",
+      `Script has now been stopped. Script ran for: ${
+        process.env.SITEMAP_INDEX_URL
+      }. Published ${COUNT_PUBLISHED_TODAY} URLs succesfully for ${Array.from(
+        allUrlsToPublish.keys()
+      )}. The last url published was: ${lastPublishedUrl}`
+    );
+    console.log("Stopping CRON job.");
+    scheduledJob.stop();
+    return;
   }
 
   if (errorSitemaps.length > 0) {
     console.warn(`Had some URLs that failed to publish: ${errorSitemaps}`);
     await emailClient.sendMail(
       "WARNING",
-      `Published ${COUNT_PUBLISHED_TODAY} URLs with some errors for ${Array.from(
+      `Script ran for: ${
+        process.env.SITEMAP_INDEX_URL
+      }. Published ${COUNT_PUBLISHED_TODAY} URLs with some errors for ${Array.from(
         allUrlsToPublish.keys()
       )}. The last url published was: ${lastPublishedUrl}. The URLs that got an error were ${errorSitemaps}.`
     );
   } else {
     await emailClient.sendMail(
       "SUCCESS",
-      `Published ${COUNT_PUBLISHED_TODAY} URLs succesfully for ${Array.from(
+      `Script ran for: ${
+        process.env.SITEMAP_INDEX_URL
+      }. Published ${COUNT_PUBLISHED_TODAY} URLs succesfully for ${Array.from(
         allUrlsToPublish.keys()
       )}. The last url published was: ${lastPublishedUrl}`
     );
@@ -200,21 +222,21 @@ const callApiToPublish = async (
   };
   for (let j = startIndex; j < urlsToPublish.length; j++) {
     // Publish URL
-    // options.headers.Authorization = `Bearer ${authData.access_token}`;
-    // options.data.url = urlsToPublish[j];
-    // let resp;
-    // try {
-    //   resp = await axios(options);
-    // } catch (e) {
-    //   returnObj.errors.push(urlsToPublish[j]);
-    //   console.warn(
-    //     `Error publishing URL: ${urlsToPublish[j]}, error was: ${e}`
-    //   );
-    //   if (e.response && e.response.status === 429) {
-    //     throw Error("API Quota Exceeded");
-    //   }
-    // }
-    // console.log(resp.status);
+    options.headers.Authorization = `Bearer ${authData.access_token}`;
+    options.data.url = urlsToPublish[j];
+    let resp;
+    try {
+      resp = await axios(options);
+    } catch (e) {
+      returnObj.errors.push(urlsToPublish[j]);
+      console.warn(
+        `Error publishing URL: ${urlsToPublish[j]}, error was: ${e}`
+      );
+      if (e.response && e.response.status === 429) {
+        throw Error("API Quota Exceeded");
+      }
+    }
+    console.log(resp.status);
     console.log(`Published: ${urlsToPublish[j]}`);
 
     // Update published count
@@ -224,6 +246,82 @@ const callApiToPublish = async (
     if (COUNT_PUBLISHED_TODAY >= MAX_QUOTA) {
       console.log("Stopping before exceeding quota...");
       returnObj.lastItemPublished = urlsToPublish[j];
+      // Exit this loop
+      break;
+    }
+  }
+  return returnObj;
+};
+
+const callApiToPublishBatch = async (
+  startIndex,
+  urlsToPublish,
+  authData = undefined
+) => {
+  let returnObj = {
+    errors: [],
+  };
+
+  const batchOptions = {
+    url: "https://indexing.googleapis.com/batch",
+    method: "POST",
+    headers: {
+      "Content-Type": "multipart/mixed",
+    },
+    auth: { bearer: authData.access_token },
+  };
+
+  const getBatchItem = (urlParam) => {
+    return {
+      "Content-Type": "application/http",
+      "Content-ID": urlParam,
+      body:
+        "POST /v3/urlNotifications:publish HTTP/1.1\n" +
+        "Content-Type: application/json\n\n" +
+        JSON.stringify({
+          url: urlParam,
+          type: "URL_UPDATED",
+        }),
+    };
+  };
+
+  let batch = [];
+  let urlsInBatch = [];
+  for (let j = startIndex; j < urlsToPublish.length; j++) {
+    // Load items until BATCH_SIZE items loaded
+    batch.push(getBatchItem(urlsToPublish[j]));
+    urlsInBatch.push(urlsToPublish[j]);
+    if (batch.length === BATCH_SIZE) {
+      // Publish batch
+      let resp;
+      try {
+        batchOptions.multipart = batch;
+        resp = await rp(batchOptions);
+        // console.log(resp);
+        if (resp.includes("Quota exceeded")) {
+          console.error("API Quota Exceeded");
+        }
+      } catch (e) {
+        console.log(e.stack);
+        // returnObj.errors.push(urlsToPublish[j]);
+        console.warn(`Error publishing batch, error was: ${e}`);
+        if (e.response && e.response.status === 429) {
+          throw Error("API Quota Exceeded");
+        }
+      }
+
+      // Update published count
+      COUNT_PUBLISHED_TODAY += urlsInBatch.length;
+      console.log(`Published ${COUNT_PUBLISHED_TODAY}/${MAX_QUOTA}`);
+      // Reset batch
+      batch = [];
+      urlsInBatch = [];
+    }
+
+    returnObj.lastItemPublished = urlsToPublish[j];
+    // If count exceeds quota
+    if (COUNT_PUBLISHED_TODAY >= MAX_QUOTA) {
+      console.log("Stopping before exceeding quota...");
       // Exit this loop
       break;
     }
@@ -253,7 +351,7 @@ const saveDataToDb = (data) => {
 };
 
 // Need to update cronjob schedule: 0 18 * * * - every day at 6pm
-const scheduledJob = new cron.CronJob("* * * * *", async () => {
+const scheduledJob = new cron.CronJob("0 18 * * *", async () => {
   console.log(`Running cron, current time: ${new Date().toISOString()}`);
   try {
     await publishSites();
