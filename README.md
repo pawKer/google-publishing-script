@@ -9,7 +9,7 @@ To setup the script you are going to need to follow a few steps.
   1. Go to https://docs.docker.com/desktop/install/mac-install/
   1. Download and install the correct version for your computer
 
-This should also install the `docker-compose` command.
+This should also automatically install the `docker-compose` command in your terminal which will be needed later.
 
 - Next, you will also need to provide the service account credentials for the Google Indexing API in a JSON file called `service_account.json` in the root of this project.
 
@@ -63,6 +63,8 @@ This will create a docker container which will run the script.
 It should look something like this in the Docker Desktop app:
 
 ![Docker Desktop Container Running](https://i.imgur.com/s2sGUEK.png)
+
+To check the output of the script you can just click on the container highlighted above.
 
 ## Schedule ⏰
 
