@@ -3,7 +3,7 @@ import google from "googleapis";
 import { XMLParser } from "fast-xml-parser";
 import fs from "fs";
 import cron from "cron";
-import key from "./service_account.json" assert { type: "json" };
+import key from "./service_account.json";
 import { EmailClient } from "./email-client.js";
 import "dotenv/config";
 import request from "request";
@@ -291,7 +291,7 @@ const callApiToPublishBatch = async (
     // Load items until BATCH_SIZE items loaded
     batch.push(getBatchItem(urlsToPublish[j]));
     urlsInBatch.push(urlsToPublish[j]);
-    if (batch.length === BATCH_SIZE) {
+    if (batch.length === BATCH_SIZE || COUNT_PUBLISHED_TODAY + batch.length === MAX_QUOTA) {
       await publishBatch(batch, batchOptions);
       // Update published count
       COUNT_PUBLISHED_TODAY += batch.length;
@@ -310,7 +310,7 @@ const callApiToPublishBatch = async (
     }
   }
   // Less than BATCH_SIZE urls remaining which we need to publish as well
-  if (batch.length !== 0 && COUNT_PUBLISHED_TODAY < MAX_QUOTA) {
+  if (batch.length !== 0 && COUNT_PUBLISHED_TODAY + batch.length <= MAX_QUOTA) {
     await publishBatch(batch, batchOptions);
     COUNT_PUBLISHED_TODAY += batch.length;
     console.log(`Published ${COUNT_PUBLISHED_TODAY}/${MAX_QUOTA}`);
