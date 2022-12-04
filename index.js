@@ -112,7 +112,7 @@ const getAllUrlsToPublish = async (config, url) => {
     console.log(`Found ${urlsToPublish.length} urls.`);
     allUrlsToPublish.set(sitemapsToCheck[i], urlsToPublish);
     addedUrls += urlsToPublish.length;
-    if (Array.from(allUrlsToPublish).length >= 2 && addedUrls > MAX_QUOTA) {
+    if (Array.from(allUrlsToPublish).length >= 4 && addedUrls > 2 * MAX_QUOTA) {
       console.log(`Got ${addedUrls} URLs. Should be enough for now.`);
       break;
     }
@@ -129,8 +129,9 @@ const publishSites = async () => {
   const config = readDataFromDb();
 
   const allUrlsToPublish = await getAllUrlsToPublish(config, sitemapIndexURL);
-  // console.log(allUrlsToPublish);
   const authData = await jwtClient.authorize();
+
+  let currentBatch = [];
   for (const sitemap of allUrlsToPublish.keys()) {
     console.log(`Processing: ${sitemap}`);
     const urlList = allUrlsToPublish.get(sitemap);
@@ -138,29 +139,65 @@ const publishSites = async () => {
 
     // We want to find the last one we published and start from there plus one
     // otherwise default to 0
-    if (COUNT_PUBLISHED_TODAY === 0) {
+    if (COUNT_PUBLISHED_TODAY === 0 && currentBatch.length === 0) {
       indexOfLastPublished = config.lastItemPublished
         ? urlList.findIndex((item) => item === config.lastItemPublished) + 1
         : 0;
 
       // If for some reason the last one we published is not in the list then default to 0
       if (indexOfLastPublished === -1) indexOfLastPublished = 0;
+      console.log(`Starting from: ${urlList[indexOfLastPublished - 1]}`);
     }
 
-    // Starting from where we left off, loop through all urls we need to publish
+
+    let curUrls = urlList.slice(indexOfLastPublished);
+    while (curUrls.length > 0) {
+      console.log(`Current batch length ${currentBatch.length}`);
+      if (currentBatch.length + curUrls.length >= BATCH_SIZE) {
+        const urlsToAdd = BATCH_SIZE - currentBatch.length;
+        console.log(`Adding until max: ${urlsToAdd}`);
+        currentBatch.push(...curUrls.slice(0, urlsToAdd));
+        const response = await callApiToPublishBatch(
+          0,
+          currentBatch,
+          authData // Need to pass authData as well
+        );
+
+        if (response.errors.length > 0) errorSitemaps.push(...response.errors);
+        lastPublishedUrl = response.lastItemPublished;
+        lastCheckedMap = sitemap;
+        if (COUNT_PUBLISHED_TODAY >= MAX_QUOTA) {
+          break;
+        }
+
+        currentBatch = curUrls.slice(urlsToAdd, BATCH_SIZE);
+        curUrls = curUrls.slice(BATCH_SIZE, curUrls.length);
+        console.log(`Remaining for batch: ${currentBatch.length}`);
+        console.log(`Remaining in current sitemap: ${curUrls.length}`);
+      } else {
+        currentBatch.push(...curUrls);
+        console.log(`Added ${curUrls.length} urls`);
+        curUrls = [];
+      }
+    }
+    if (COUNT_PUBLISHED_TODAY >= MAX_QUOTA) {
+      break;
+    }
+  }
+
+  if (currentBatch.length > 0 && COUNT_PUBLISHED_TODAY < MAX_QUOTA) {
+    console.log(`Publishing remaining ${currentBatch.length} urls`);
     const response = await callApiToPublishBatch(
-      indexOfLastPublished,
-      urlList,
+      0,
+      currentBatch,
       authData // Need to pass authData as well
     );
 
     if (response.errors.length > 0) errorSitemaps.push(...response.errors);
     lastPublishedUrl = response.lastItemPublished;
-    lastCheckedMap = sitemap;
-    if (COUNT_PUBLISHED_TODAY >= MAX_QUOTA) {
-      break;
-    }
+    lastCheckedMap = Array.from(allUrlsToPublish.keys()).at(-1);
   }
+
   saveDataToDb({
     lastMapChecked: lastCheckedMap,
     lastItemPublished: lastPublishedUrl,
@@ -291,7 +328,10 @@ const callApiToPublishBatch = async (
     // Load items until BATCH_SIZE items loaded
     batch.push(getBatchItem(urlsToPublish[j]));
     urlsInBatch.push(urlsToPublish[j]);
-    if (batch.length === BATCH_SIZE || COUNT_PUBLISHED_TODAY + batch.length === MAX_QUOTA) {
+    if (
+      batch.length === BATCH_SIZE ||
+      COUNT_PUBLISHED_TODAY + batch.length === MAX_QUOTA
+    ) {
       await publishBatch(batch, batchOptions);
       // Update published count
       COUNT_PUBLISHED_TODAY += batch.length;
