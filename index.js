@@ -3,7 +3,7 @@ import google from "googleapis";
 import { XMLParser } from "fast-xml-parser";
 import fs from "fs";
 import cron from "cron";
-import key from "./service_account.json";
+import key from "./service_account.json" assert { type: "json" };
 import { EmailClient } from "./email-client.js";
 import "dotenv/config";
 import request from "request";
